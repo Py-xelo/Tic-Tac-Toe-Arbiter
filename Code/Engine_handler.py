@@ -9,6 +9,7 @@ import importlib.util
 import inspect
 import sys
 import Resources.program_settings as set
+import time
 
 class Data_receive:
     def test(self):
@@ -23,26 +24,30 @@ class Engine_handler(Data_receive):
             raise ValueError("The engine directory could not be found")
         else:
             self.path = engine_directory
-        try: self._verify_comms_file()
-        except Exception as error: raise error 
+        #try: self._verify_comms_file()
+        #except Exception as error: raise error 
         
         self.path_main_file = os.path.join(self.path,"Engine_main.py") #path of the script which will be launched
         if not os.path.isfile(self.path_main_file): #checks if the path is valid and a file
             raise ImportError(f"{set.ENGINE_MAINFILE} file does not exist or could not be found")
-        
-        #self.handle_data = Data_receive()
-
+ 
         self.arbiter_conn, self.engine_conn = mpcon.Pipe()
-        self._launch_engine_instance(self.engine_conn,self.identificator,self.path_main_file)
-        self.engine = Process(target=self._launch_engine_instance,args=(self.engine_conn,self.identificator,self.path_main_file))
+        self.engine = Process(target=Engine_handler._launch_engine_instance,args=(self.engine_conn,self.identificator,self.path_main_file,self.path))
         self.process = psutil.Process(self.engine.pid)
         self.process.cpu_affinity(cpu_affinity)
-        #self.engine.start()
+        self.engine.start()
+        self.arbiter_conn.send(("ARBITER","PING",()))
+        received = mpcon.wait([self.arbiter_conn],2)
+        if self.arbiter_conn in received:
+            print(self.arbiter_conn.recv())
+        else: raise RuntimeError("Engine did not reply to initial ping")
+        self._terminate()
+
+   
 
 
     def _verify_comms_file(self):
         comms_address = os.path.join(self.path,set.COMMS_FILENAME)
-        print(comms_address)
         if os.path.isfile(comms_address):
             with open(comms_address, "rb") as engine_file:
                 digested_engine_file = hashlib.file_digest(engine_file, "sha256")
@@ -60,31 +65,29 @@ class Engine_handler(Data_receive):
         else:
             raise FileNotFoundError(f"{set.COMMS_FILENAME} does not exist or could not be found")
 
-
-    def _load_top_engine_class(self,identification,path_to_main):
+    @staticmethod
+    def _load_top_engine_class(identification,path_to_main):
         Engine_spec = importlib.util.spec_from_file_location(identification,path_to_main)
         module = importlib.util.module_from_spec(Engine_spec)
         Engine_spec.loader.exec_module(module)
         return module
 
-    def _launch_engine_instance(self,pipe_connection,identification,path_to_main):
-        sys.path.insert(0,str(self.path))
-        module = self._load_top_engine_class(identification,path_to_main)
+    @staticmethod
+    def _launch_engine_instance(pipe_connection,identification,path_to_main,path_to_engine):
+        sys.path.insert(0,str(path_to_engine))
+        module = Engine_handler._load_top_engine_class(identification,path_to_main)
         avaliable_classes = inspect.getmembers(module)
         main_engine_class = None
         for name,object_type in avaliable_classes:
             if inspect.isclass(object_type):
                 class_name = name.casefold()
-                print(class_name)
                 if class_name.casefold() == ("main_engine"):
                     if not main_engine_class:
                         main_engine_class = object_type
-                        print("set class ",main_engine_class)
                     else:
-                        raise ImportError(f"{set.ENGINE_MAINFILE} contains multiple instances of classes with 'engine' and 'main' in its name")
-
-        engine_instance = module.main_engine_class(pipe_connection)
-        return engine_instance
+                        raise ImportError(f"{identification} contains multiple instances of classes named 'Engine_Main'")
+                    
+        main_engine_class(pipe_connection)
 
 
 

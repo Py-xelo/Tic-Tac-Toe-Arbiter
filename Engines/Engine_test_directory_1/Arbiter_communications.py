@@ -76,7 +76,13 @@ class Arbiter_communication:
             dictionary_reply = self.arbiter_translation.get(input_data[1],KeyError)
             if dictionary_reply is not KeyError:
                 request_arguments = len(input_data[2])
-                arbiter_method = True       
+                if callable(dictionary_reply):
+                    arbiter_method = True
+                else:
+                    arbiter_method = False
+                # if the packet is an arbiter instruction, however is not a method call, the flag which would trigger the call is turned off
+                
+                           
         else:
             # if it isnt, its checked with normal translation dictionary, obviously no method_call for arbiter instruction is determined
             dictionary_reply = self.translate_public_function.get(input_data[0],KeyError)
@@ -86,11 +92,7 @@ class Arbiter_communication:
         # argument lengths are stored in both cases to be compared
 
         if not(dictionary_reply == KeyError): #if the function actually exists and can be searched up
-            requested_function = dictionary_reply[0]
             function_arguments = dictionary_reply [1]
-            if arbiter_method and type(requested_function) is not function:
-                # if the packet is an arbiter instruction, however is not a method call, the flag which would trigger the call is turned off
-                arbiter_method = False
             if request_arguments == function_arguments: # if the argument lengths match between actually called and expected lengths
                 return True, arbiter_method # returns a tuple, first being that it is a valid instruction and flag if its a arbiter method call
 
@@ -100,7 +102,7 @@ class Arbiter_communication:
     def _handle_received(self,received_data: tuple):
         valid, for_arbiter_execution = self._check_receive_validity(received_data) #get the validity and arbiter method flags
 
-        if for_arbiter_execution(): #if the arbiter method flag is on, execute the arbiter function
+        if for_arbiter_execution: #if the arbiter method flag is on, execute the arbiter function
             self.arbiter_translation[received_data[1]](received_data[2])
         elif valid: #if its valid but not for arbiter, just return
             return received_data 

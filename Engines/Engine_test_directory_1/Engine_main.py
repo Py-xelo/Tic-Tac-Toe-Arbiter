@@ -10,6 +10,9 @@ class Main_Engine:
             "PONDER" : self.ponder
         }
 
+        print("ENGINE ALIVE")
+        self.main_loop()
+
     def main_loop(self):
         while True:
             request = self.comms.receive_arbiter_instruction()
@@ -21,12 +24,7 @@ class Main_Engine:
 
             
     def check_move(self):
-        NotImplemented
+        print(f"Definitely running engine")
 
     def ponder(self):
         NotImplemented
-
-    def testing_function(self,string_to_test):
-        print(string_to_test)
-        
-print("stinky!")

@@ -1,14 +1,17 @@
-import Arbiter_communications
+from Arbiter_communications import Arbiter_communication
 
 
 class Main_Engine:
     def __init__(self,pipe_conn):
-        self.comms = Arbiter_communications.Arbiter_communication(pipe_conn)
+        self.comms = Arbiter_communication(pipe_conn)
 
         self.translate = {
             "MOVE": self.check_move,
             "PONDER" : self.ponder
         }
+
+        print("ENGINE ALIVE")
+        self.main_loop()
 
     def main_loop(self):
         while True:
@@ -21,7 +24,7 @@ class Main_Engine:
 
             
     def check_move(self):
-        NotImplemented
+        print(f"Definitely running engine")
 
     def ponder(self):
         NotImplemented

@@ -1,7 +1,7 @@
 import multiprocessing.connection as mpcon
 import time
 
-# VERSION --- V1.0.0
+# VERSION --- V1.0.1
 # API --- IAPI 1.0
 
 class Arbiter_communication:
@@ -55,7 +55,7 @@ class Arbiter_communication:
         # arbiter functions - functions which will be called directly when called
         self.arbiter_translation = {
             "PIPE_CLOSE": (self.__close_pipe,0),
-            "PING": (self._ping,1)
+            "PING": (self._ping,0)
             }
 
         # dictionary which has the argument details for each function the Arbiter can call
@@ -75,37 +75,49 @@ class Arbiter_communication:
             # if the function is meant for Arbiter, it gets translated using special dictionary, which also checks if the instruction is a method call
             dictionary_reply = self.arbiter_translation.get(input_data[1],KeyError)
             if dictionary_reply is not KeyError:
-                request_arguments = len(input_data[2])
-                arbiter_method = True       
+                arguments = input_data[2]
+                request_args_length = self._determine_arg(arguments)
+                if callable(dictionary_reply[0]):
+                    arbiter_method = True
+                else:
+                    arbiter_method = False
+                # if the packet is an arbiter instruction, however is not a method call, the flag which would trigger the call is turned off
+                      
         else:
             # if it isnt, its checked with normal translation dictionary, obviously no method_call for arbiter instruction is determined
             dictionary_reply = self.translate_public_function.get(input_data[0],KeyError)
             if not(dictionary_reply == KeyError):
-                request_arguments = len(input_data[1])
+                request_args_length = self._determine_arg(input_data[1])
 
         # argument lengths are stored in both cases to be compared
 
-        if not(dictionary_reply == KeyError): #if the function actually exists and can be searched up
-            requested_function = dictionary_reply[0]
-            function_arguments = dictionary_reply [1]
-            if arbiter_method and type(requested_function) is not function:
-                # if the packet is an arbiter instruction, however is not a method call, the flag which would trigger the call is turned off
-                arbiter_method = False
-            if request_arguments == function_arguments: # if the argument lengths match between actually called and expected lengths
+        if not(dictionary_reply == KeyError): #if the instruction actually exists and can be searched up
+            function_arguments = dictionary_reply[1]
+            if request_args_length == function_arguments: # if the argument lengths match between actually called and expected lengths
                 return True, arbiter_method # returns a tuple, first being that it is a valid instruction and flag if its a arbiter method call
 
         return False, False #function does not exist or lengths do not match, returns False for validity and False for arbiter method call flag
 
+    def _determine_arg(self,function_arguments):
+        if isinstance(function_arguments,(list,tuple)):
+            length = len(function_arguments)
+        elif isinstance(function_arguments,(int,float)):
+            length = 1
+        else:
+            length = None
+
+        return length
+
 
     def _handle_received(self,received_data: tuple):
         valid, for_arbiter_execution = self._check_receive_validity(received_data) #get the validity and arbiter method flags
-
-        if for_arbiter_execution(): #if the arbiter method flag is on, execute the arbiter function
-            self.arbiter_translation[received_data[1]](received_data[2])
+        if for_arbiter_execution: #if the arbiter method flag is on, execute the arbiter function
+            arguments = received_data[2]
+            self.arbiter_translation[received_data[1]][0](*arguments)
         elif valid: #if its valid but not for arbiter, just return
             return received_data 
         else:
-            self.send_to_arbiter(("ARBITER","FUNCTION_INVALID",(received_data))) #incase of invalid receive, let the arbiter know. sends back the whole 
+            self.send_to_arbiter(("ARBITER","INSTRUCTION_INVALID",(received_data))) #incase of invalid receive, let the arbiter know. sends back the whole 
             return None
 
     def __close_pipe(self): #closes the communication pipe - Arbiter is not gonna be happy with this call unless it was requested

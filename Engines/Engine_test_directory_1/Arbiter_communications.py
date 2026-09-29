@@ -1,13 +1,21 @@
 import multiprocessing.connection as mpcon
 import time
 
-# VERSION --- V1.0.1
-# API --- IAPI 1.0
+
 
 class Arbiter_communication:
-    """IMPORTANT NOTE: YOUR ENGINE WILL NOT EVEN START IF YOU TOUCH ANYTHING IN HERE!
+    """IMPORTANT NOTE: This file must be present and located in the root folder of your Engine under the same name as on GitHub (Arbiter_communications.py)\n
+        NOTE: Your Engine will NOT start if you modify this file in ANY capacity.
     
-        Class which directly communicates with the Arbiter. Create an instance of this class with the pipe connection provided.
+        VERSION --- V1.0.1\n
+        API --- IAPI 1.0\n
+        
+        Class which directly communicates with the Arbiter. Create an instance of this class with the pipe connection provided for the easiest communication with the arbiter.\n
+        
+        While your Engine does not theoretically need to use this, it is highly recommended. It makes your job a lot easier, and pretty much frees you from the hassle of inter-process communication.
+        Be advised if you instead choose to create your own communications channel, that I (the author and authority) will not help you debug it when it fails, and it WILL be your problem.
+
+        
     """
 
     # Public-facing functions, which you can (and need) to use in order to communicate with the Arbiter

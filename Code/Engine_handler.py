@@ -9,7 +9,6 @@ import importlib.util
 import inspect
 import sys
 import Resources.program_settings as set
-import time
 
 class Data_receive:
     def test(self):
@@ -24,8 +23,8 @@ class Engine_handler(Data_receive):
             raise ValueError("The engine directory could not be found")
         else:
             self.path = engine_directory
-        #try: self._verify_comms_file()
-        #except Exception as error: raise error 
+        try: self._verify_comms_file()
+        except Exception as error: raise error 
         
         self.path_main_file = os.path.join(self.path,"Engine_main.py") #path of the script which will be launched
         if not os.path.isfile(self.path_main_file): #checks if the path is valid and a file

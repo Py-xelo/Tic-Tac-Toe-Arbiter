@@ -42,6 +42,7 @@ class Engine_handler(Data_receive):
 
     def _verify_comms_file(self):
         comms_address = os.path.join(self.path,set.COMMS_FILENAME)
+        print(comms_address)
         if os.path.isfile(comms_address):
             with open(comms_address, "rb") as engine_file:
                 digested_engine_file = hashlib.file_digest(engine_file, "sha256")
@@ -74,14 +75,16 @@ class Engine_handler(Data_receive):
         for name,object_type in avaliable_classes:
             if inspect.isclass(object_type):
                 class_name = name.casefold()
-                if class_name.find("engine") and class_name.find("main"):
+                print(class_name)
+                if class_name.casefold() == ("main_engine"):
                     if not main_engine_class:
-                        main_engine_class = class_name
+                        main_engine_class = object_type
+                        print("set class ",main_engine_class)
                     else:
                         raise ImportError(f"{set.ENGINE_MAINFILE} contains multiple instances of classes with 'engine' and 'main' in its name")
 
         engine_instance = module.main_engine_class(pipe_connection)
-        engine_instance.run()
+        return engine_instance
 
 
 

@@ -26,4 +26,7 @@ class Main_Engine:
     def ponder(self):
         NotImplemented
 
+    def testing_function(self,string_to_test):
+        print(string_to_test)
+        
 print("stinky!")

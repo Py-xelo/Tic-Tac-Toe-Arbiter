@@ -11,16 +11,37 @@ import importlib.util
 import inspect
 import sys
 import time
+from dataclasses import dataclass
+from typing import Callable
+
 
 from Resources.program_settings import Engine_Handling as set
 
 class Engine_handler:
 
     class Communications:
+
+        class Instruction:
+            function = Callable
+            args = int
+            returns = None or tuple or Callable
+            engine_first = bool
+            for_arbiter = bool
+
         def __init__(self):
             self.instruction_send_translate = {
-              
+              "MOVE":self.Instruction(self.request_move,int,True,True),
+              "PONDER":self.Instruction(NotImplementedError,int,False,True),
+              "SETTINGS":self.Instruction(NotImplementedError,int,False,True),
+              "RESIGN":self.Instruction(NotImplementedError,int,True,False)
             }
+
+        def execute(function,timeout=0):
+            pass
+
+        def request_move():
+            pass
+
 
     def __init__(self,engine_directory, engine_identificator, cpu_affinity:tuple):
         self.comms = self.Communications()

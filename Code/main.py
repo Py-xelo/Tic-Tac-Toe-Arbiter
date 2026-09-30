@@ -4,12 +4,12 @@ sys.path.insert(0,str(os.getcwd())) # sets the sys.path so absolute importing pa
 
 # absolute path imports which need the inserted sys.path to be imported from parent folder, not /Code folder
 from Code.Engine_handler import Engine_handler
-from Resources import program_settings as set
+from Resources.program_settings import Engine_Handling as engset
 
 
 class Engine_instance_management:
     def __init__(self): #makes a list of all avaliable engines
-        self.path = os.path.join(os.getcwd(),set.ENGINE_FOLDERNAME)
+        self.path = os.path.join(os.getcwd(),engset.ENGINE_FOLDERNAME)
         if not os.path.isdir(self.path):
             raise ImportError(f"Directory 'Engines' could not be result {os.getcwd()}. Set chdir to Tic_Tac_Arbiter directory!")
 
@@ -41,5 +41,5 @@ def engine_instance_start(engine_id):
     return Engine_handler(os.path.join(engines.path,instance_data[1]),instance_data[0],(0,1))
 
 if __name__ == "__main__":
-    engine_instance = engine_instance_start(0)
+    engine_instance = engine_instance_start(2)
     

@@ -12,31 +12,56 @@ import inspect
 import sys
 import time
 from dataclasses import dataclass
-from typing import Callable
+import typing
+from enum import Enum, auto
 
 
-from Resources.program_settings import Engine_Handling as set
+from Resources.program_settings import Engine_Handling as engset
+
+
+class ins(Enum): #list of all avaliable instructions
+    # public functions
+    MOVE = auto()
+    PONDER = auto()
+    SETTINGS = auto()
+    RESIGN = auto()
+
+    # Arbiter functions
+    ARBITER_PING = auto()
+    ARBITER_PING_REPLY = auto()
+    ARBITER_PIPE_CLOSE = auto()
+    ARBITER_PIPE_CLOSED = auto()
+    ARBITER_INVALID_FUNCTION = auto()
+
+@dataclass
+class Instruction_base:
+    function: typing.Callable | None
+    arg_length: int = 0
+    timeout: int | float = 0
+    returns: typing.Any = None
+    is_reply: bool = False
+    engine_first: bool = False
+    arbiter: bool = False
+    
 
 class Engine_handler:
-
     class Communications:
-
-        class Instruction:
-            function = Callable
-            args = int
-            returns = None or tuple or Callable
-            engine_first = bool
-            for_arbiter = bool
-
         def __init__(self):
-            self.instruction_send_translate = {
-              "MOVE":self.Instruction(self.request_move,int,True,True),
-              "PONDER":self.Instruction(NotImplementedError,int,False,True),
-              "SETTINGS":self.Instruction(NotImplementedError,int,False,True),
-              "RESIGN":self.Instruction(NotImplementedError,int,True,False)
+            self.translate = {
+                    # Public facing functions declarations
+                ins.MOVE : Instruction_base(self.request_move,0,returns=(NotImplemented),timeout=engset.MOVE_DEFAULT_TIMEOUT),
+                ins.PONDER : Instruction_base(NotImplemented),
+                ins.SETTINGS : Instruction_base(NotImplemented),
+                ins.RESIGN : Instruction_base(NotImplemented),
+                    # Arbiter functions declarations
+                ins.ARBITER_PING : Instruction_base(NotImplemented, timeout = engset.ARBITER_DEFAULT_TIMEOUT, returns=ins.ARBITER_PING_REPLY, arbiter=True),
+                ins.ARBITER_PING_REPLY : Instruction_base(None, arg_length=1, returns=int,is_reply=True, arbiter=True),
+                ins.ARBITER_PIPE_CLOSE : Instruction_base(NotImplemented,timeout=engset.ARBITER_DEFAULT_TIMEOUT,arbiter=True),
+                ins.ARBITER_PIPE_CLOSED : Instruction_base(None, is_reply=True, arbiter=True),
+                ins.ARBITER_INVALID_FUNCTION : Instruction_base(None, arg_length=3, returns=(typing.AnyStr,typing.AnyStr,typing.Tuple), is_reply=True, engine_first=True, arbiter= True)
             }
 
-        def execute(function,timeout=0):
+        def execute(self,instruction,function_args,timeout):
             pass
 
         def request_move():
@@ -60,7 +85,7 @@ class Engine_handler:
         
         self.path_main_file = os.path.join(self.path,"Engine_main.py") #path of the script which will be launched
         if not os.path.isfile(self.path_main_file): #checks if the path is valid and a file
-            raise ImportError(f"{set.ENGINE_MAINFILE} file does not exist or could not be found")
+            raise ImportError(f"{engset.ENGINE_MAINFILE} file does not exist or could not be found")
  
         self.arbiter_conn, self.engine_conn = mpcon.Pipe()
         self.engine = Process(target=Engine_handler._launch_engine_instance,args=(self.engine_conn,self.identificator,self.path_main_file,self.path))
@@ -74,7 +99,7 @@ class Engine_handler:
 
     # Verification, that the Communications file provided by the engine is the same as the Engine_base - (if the versions match)
     def _verify_comms_file(self):
-        comms_address = os.path.join(self.path,set.COMMS_FILENAME)
+        comms_address = os.path.join(self.path,engset.COMMS_FILENAME)
         if os.path.isfile(comms_address):
             # only actually checks if the path to engine communications file is valid and is a file directory
             HASH = "sha256" #uses sha256 hashing. Absolutely overkill, but why not
@@ -84,10 +109,10 @@ class Engine_handler:
                 digested_engine = digested_engine_file.hexdigest()
 
             try:
-                with open(os.path.join(os.getcwd(),"Engine_base",set.COMMS_FILENAME), "rb") as engine_base_file:
+                with open(os.path.join(os.getcwd(),"Engine_base",engset.COMMS_FILENAME), "rb") as engine_base_file:
                     digested_arbiter_file = hashlib.file_digest(engine_base_file, HASH)
                     digested_arbiter = digested_arbiter_file.hexdigest()
-            except FileNotFoundError: raise FileNotFoundError(f"Arbiter-side {set.COMMS_FILENAME} does not exist or could not be found")
+            except FileNotFoundError: raise FileNotFoundError(f"Arbiter-side {engset.COMMS_FILENAME} does not exist or could not be found")
 
             # hashes both communications file using the same hashing system. If the files match, the hash will be the same string as generated in .hexdigest()
 
@@ -97,12 +122,12 @@ class Engine_handler:
                 return True
                 # if the hashes match both files are closed (I dont know if its neccessary, but im not keeping them open) and True flag is returned
             else:
-                raise ImportError(f"Verification {set.COMMS_FILENAME} file does not match with one found in Engine (root) folder")
+                raise ImportError(f"Verification {engset.COMMS_FILENAME} file does not match with one found in Engine (root) folder")
                 # both files were hashed, but one did not match another
         else:
-            raise FileNotFoundError(f"Engine-side {set.COMMS_FILENAME} does not exist or could not be found")
+            raise FileNotFoundError(f"Engine-side {engset.COMMS_FILENAME} does not exist or could not be found")
 
-    def ping_engine(self,timeout=set.DEFAULT_TIMEOUT):
+    def ping_engine(self,timeout=engset.MOVE_DEFAULT_TIMEOUT):
         """
         Returns True if the engine replies with ("ARBITER","PING-REPLY",(time_ns))
         """
@@ -159,7 +184,3 @@ class Engine_handler:
     def _terminate(self):
         self.engine.terminate()
         print(f"Engine {self.identificator} process forcefully terminated")
-
-    
-
-

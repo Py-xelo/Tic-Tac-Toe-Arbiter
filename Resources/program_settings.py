@@ -1,5 +1,6 @@
 class Engine_Handling:
-    DEFAULT_TIMEOUT = 1 # seconds
+    MOVE_DEFAULT_TIMEOUT = 1 # seconds
+    ARBITER_DEFAULT_TIMEOUT = 0.2 # seconds
 
     ENGINE_FOLDERNAME = "Engines"
     COMMS_FILENAME = "Arbiter_communications.py"

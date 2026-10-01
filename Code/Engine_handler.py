@@ -35,8 +35,7 @@ class arbins(Enum): #list of all avaliable arbiter instructions
     INVALID_FUNCTION = auto()
 
 @dataclass
-class Instruction_base:
-    implemented: bool = True
+class Instruction_base: 
     arg_length: int = 0
     send_args: typing.Any = None
     timeout: int | float = 0
@@ -44,6 +43,8 @@ class Instruction_base:
     is_reply: bool = False
     engine_first: bool = False
     arbiter: bool = False
+    sendable: bool = True
+    implemented: bool = True
 
 @dataclass
 class Pipe:
@@ -62,23 +63,18 @@ class Engine_handler:
                 ins.MOVE : Instruction_base(arg_length=0,returns=(NotImplemented),timeout=engset.MOVE_DEFAULT_TIMEOUT),
                 ins.PONDER : Instruction_base(implemented=False),
                 ins.SETTINGS : Instruction_base(implemented=False),
-                ins.RESIGN : Instruction_base(engine_first=True),
+                ins.RESIGN : Instruction_base(engine_first=True, sendable= False),
                     # Arbiter functions declarations
                 arbins.PING : Instruction_base(timeout = engset.ARBITER_DEFAULT_TIMEOUT, returns=arbins.PING_REPLY, arbiter=True),
-                arbins.PING_REPLY : Instruction_base(_arg_length=1, returns=int,is_reply=True, arbiter=True),
+                arbins.PING_REPLY : Instruction_base(arg_length=1, returns=int, is_reply=True, arbiter=True, sendable=False),
                 arbins.PIPE_CLOSE : Instruction_base(timeout=engset.ARBITER_DEFAULT_TIMEOUT,arbiter=True),
-                arbins.PIPE_CLOSED : Instruction_base(is_reply=True, arbiter=True),
+                arbins.PIPE_CLOSED : Instruction_base(is_reply=True, arbiter=True, sendable= False),
                 arbins.INVALID_FUNCTION : Instruction_base(arg_length=3, returns=(typing.AnyStr,typing.AnyStr,typing.Tuple), is_reply=True, engine_first=True, arbiter= True)
             }
 
-        def send(self,instruction: ins|arbins ,function_args: int,timeout=0):
+        def send(self, instruction: ins|arbins, function_args: typing.Tuple):
             try:
-                if not self.pipe.arbiter.closed:
-                    pass
-                elif self.pipe.arbiter.closed != self.pipe.was_closed:
-                    raise ValueError(errno.ENOTCONN,"Pipe to engine is closed!")
-                else:
-                    raise BrokenPipeError(errno.ECONNREFUSED,"Pipe was closed without previous instruction")
+                self._check_pipe()
             except Exception as exc: raise exc
             else:
                 param = self.translate.get(instruction,KeyError)
@@ -86,13 +82,15 @@ class Engine_handler:
 
             try:
                 if param == KeyError:
-                    raise KeyError(errno.ENXIO,"Requested function does not exist or is not implemented")
-                elif instruction.name == NotImplemented:
+                    raise KeyError(errno.ENXIO,"Requested function does not exist")
+                elif not param.implemented:
                     raise NotImplementedError(errno.ENOSYS,f"The functionality for {instruction} was not yet implemented")
-                elif send_arg_length == param.arg_length:
+                elif not param.sendable:
+                    raise TypeError(errno.ESPIPE,f"instruction {instruction.name} cannot be sent to Engine")
+                elif send_arg_length != param.arg_length:
                     raise ValueError(errno.E2BIG,f"instruction {instruction.name} expects {param.arg_length} args, but {send_arg_length} were received")
-                elif timeout > engset.MAX_TIMEOUT:
-                    raise ValueError(errno.EINVAL,f"requested timeout ({timeout} s) exceeds maximum allowed timeout ({engset.MAX_TIMEOUT} s)")
+                #elif timeout > engset.MAX_TIMEOUT:
+                 #   raise ValueError(errno.EINVAL,f"requested timeout ({timeout} s) exceeds maximum allowed timeout ({engset.MAX_TIMEOUT} s)")
             except Exception as exc: raise exc
             else:
                 print(f"instruction {instruction} has passed send checks")
@@ -103,6 +101,14 @@ class Engine_handler:
             else:
                 pipe_string = ("ARBITER",instruction.name,(function_args))
             self.pipe.arbiter.send(pipe_string)
+
+        def _check_pipe(self):
+            if not self.pipe.arbiter.closed:
+                pass
+            elif self.pipe.arbiter.closed != self.pipe.was_closed:
+                raise ValueError(errno.ENOTCONN,"Pipe to engine is closed!")
+            else:
+                raise BrokenPipeError(errno.ECONNREFUSED,"Pipe was closed without previous instruction")
 
         def _determine_length(self,function_arguments):
                 if isinstance(function_arguments,(list,tuple)):
@@ -141,8 +147,13 @@ class Engine_handler:
         self.process = psutil.Process(self.engine.pid)
         self.process.cpu_affinity(cpu_affinity)
         self.engine.start()
-        self.ping_engine()
-        self._terminate()
+        self.comms.send(arbins.PING,())
+        received = mpcon.wait([self.pipe.arbiter],engset.MOVE_DEFAULT_TIMEOUT)
+        if self.pipe.arbiter in received:
+            print(self.pipe.arbiter.recv())
+            self._close()
+        else: self._terminate()
+        
         
 
 
@@ -175,13 +186,6 @@ class Engine_handler:
                 # both files were hashed, but one did not match another
         else:
             raise FileNotFoundError(f"Engine-side {engset.COMMS_FILENAME} does not exist or could not be found")
-
-    def ping_engine(self,timeout=engset.MOVE_DEFAULT_TIMEOUT):
-        """
-        Returns True if the engine replies with ("ARBITER","PING-REPLY",(time_ns))
-        """
-        self.pipe.arbiter.send(("ARBITER","PING",()))
-        
 
     ## Functions to initiate the Main_Engine class in Engine_main.py file - both functions need to be bound (static), as they are already executed in a different process - dont have access to this class
     # basically imports Engine_main.py as a module so I can reference stuff inside of it

@@ -10,7 +10,7 @@ import os
 import importlib.util
 import inspect
 import sys
-import time
+import errno
 from dataclasses import dataclass
 import typing
 from enum import Enum, auto
@@ -19,57 +19,106 @@ from enum import Enum, auto
 from Resources.program_settings import Engine_Handling as engset
 
 
-class ins(Enum): #list of all avaliable instructions
-    # public functions
-    MOVE = auto()
+class ins(Enum): #list of all avaliable public instructions
+    # public functions begin with 1--
+    MOVE = 100
     PONDER = auto()
     SETTINGS = auto()
     RESIGN = auto()
-
-    # Arbiter functions
-    ARBITER_PING = auto()
-    ARBITER_PING_REPLY = auto()
-    ARBITER_PIPE_CLOSE = auto()
-    ARBITER_PIPE_CLOSED = auto()
-    ARBITER_INVALID_FUNCTION = auto()
+    
+class arbins(Enum): #list of all avaliable arbiter instructions
+    # Arbiter functions begin with 2--
+    PING = 200
+    PING_REPLY = auto()
+    PIPE_CLOSE = auto()
+    PIPE_CLOSED = auto()
+    INVALID_FUNCTION = auto()
 
 @dataclass
 class Instruction_base:
-    function: typing.Callable | None
+    implemented: bool = True
     arg_length: int = 0
+    send_args: typing.Any = None
     timeout: int | float = 0
     returns: typing.Any = None
     is_reply: bool = False
     engine_first: bool = False
     arbiter: bool = False
+
+@dataclass
+class Pipe:
+    arbiter: mpcon.PipeConnection
+    engine: mpcon.PipeConnection
+    was_closed: bool = True
     
 
 class Engine_handler:
     class Communications:
-        def __init__(self):
-            self.translate = {
+        def __init__(self,connection: Pipe):
+            self.pipe = connection
+
+            self.translate = {               
                     # Public facing functions declarations
-                ins.MOVE : Instruction_base(self.request_move,0,returns=(NotImplemented),timeout=engset.MOVE_DEFAULT_TIMEOUT),
-                ins.PONDER : Instruction_base(NotImplemented),
-                ins.SETTINGS : Instruction_base(NotImplemented),
-                ins.RESIGN : Instruction_base(NotImplemented),
+                ins.MOVE : Instruction_base(arg_length=0,returns=(NotImplemented),timeout=engset.MOVE_DEFAULT_TIMEOUT),
+                ins.PONDER : Instruction_base(implemented=False),
+                ins.SETTINGS : Instruction_base(implemented=False),
+                ins.RESIGN : Instruction_base(engine_first=True),
                     # Arbiter functions declarations
-                ins.ARBITER_PING : Instruction_base(NotImplemented, timeout = engset.ARBITER_DEFAULT_TIMEOUT, returns=ins.ARBITER_PING_REPLY, arbiter=True),
-                ins.ARBITER_PING_REPLY : Instruction_base(None, arg_length=1, returns=int,is_reply=True, arbiter=True),
-                ins.ARBITER_PIPE_CLOSE : Instruction_base(NotImplemented,timeout=engset.ARBITER_DEFAULT_TIMEOUT,arbiter=True),
-                ins.ARBITER_PIPE_CLOSED : Instruction_base(None, is_reply=True, arbiter=True),
-                ins.ARBITER_INVALID_FUNCTION : Instruction_base(None, arg_length=3, returns=(typing.AnyStr,typing.AnyStr,typing.Tuple), is_reply=True, engine_first=True, arbiter= True)
+                arbins.PING : Instruction_base(timeout = engset.ARBITER_DEFAULT_TIMEOUT, returns=arbins.PING_REPLY, arbiter=True),
+                arbins.PING_REPLY : Instruction_base(_arg_length=1, returns=int,is_reply=True, arbiter=True),
+                arbins.PIPE_CLOSE : Instruction_base(timeout=engset.ARBITER_DEFAULT_TIMEOUT,arbiter=True),
+                arbins.PIPE_CLOSED : Instruction_base(is_reply=True, arbiter=True),
+                arbins.INVALID_FUNCTION : Instruction_base(arg_length=3, returns=(typing.AnyStr,typing.AnyStr,typing.Tuple), is_reply=True, engine_first=True, arbiter= True)
             }
 
-        def execute(self,instruction,function_args,timeout):
-            pass
+        def send(self,instruction: ins|arbins ,function_args: int,timeout=0):
+            try:
+                if not self.pipe.arbiter.closed:
+                    pass
+                elif self.pipe.arbiter.closed != self.pipe.was_closed:
+                    raise ValueError(errno.ENOTCONN,"Pipe to engine is closed!")
+                else:
+                    raise BrokenPipeError(errno.ECONNREFUSED,"Pipe was closed without previous instruction")
+            except Exception as exc: raise exc
+            else:
+                param = self.translate.get(instruction,KeyError)
+                send_arg_length = self._determine_length(function_args)
 
-        def request_move():
-            pass
+            try:
+                if param == KeyError:
+                    raise KeyError(errno.ENXIO,"Requested function does not exist or is not implemented")
+                elif instruction.name == NotImplemented:
+                    raise NotImplementedError(errno.ENOSYS,f"The functionality for {instruction} was not yet implemented")
+                elif send_arg_length == param.arg_length:
+                    raise ValueError(errno.E2BIG,f"instruction {instruction.name} expects {param.arg_length} args, but {send_arg_length} were received")
+                elif timeout > engset.MAX_TIMEOUT:
+                    raise ValueError(errno.EINVAL,f"requested timeout ({timeout} s) exceeds maximum allowed timeout ({engset.MAX_TIMEOUT} s)")
+            except Exception as exc: raise exc
+            else:
+                print(f"instruction {instruction} has passed send checks")
+
+            pipe_string = None
+            if not param.arbiter:
+                pipe_string = (instruction.name,(function_args))
+            else:
+                pipe_string = ("ARBITER",instruction.name,(function_args))
+            self.pipe.arbiter.send(pipe_string)
+
+        def _determine_length(self,function_arguments):
+                if isinstance(function_arguments,(list,tuple)):
+                    length = len(function_arguments)
+                elif isinstance(function_arguments,(int,float)):
+                    length = 1
+                else:
+                    length = None
+        
+                return length
 
 
     def __init__(self,engine_directory, engine_identificator, cpu_affinity:tuple):
-        self.comms = self.Communications()
+        connection = mpcon.Pipe()
+        self.pipe = Pipe(*connection)
+        self.comms = self.Communications(self.pipe)
         self.identificator = engine_identificator
 
         if not os.path.isdir(engine_directory): # checks if provided engine directory exists
@@ -87,8 +136,8 @@ class Engine_handler:
         if not os.path.isfile(self.path_main_file): #checks if the path is valid and a file
             raise ImportError(f"{engset.ENGINE_MAINFILE} file does not exist or could not be found")
  
-        self.arbiter_conn, self.engine_conn = mpcon.Pipe()
-        self.engine = Process(target=Engine_handler._launch_engine_instance,args=(self.engine_conn,self.identificator,self.path_main_file,self.path))
+        
+        self.engine = Process(target=Engine_handler._launch_engine_instance,args=(self.pipe.engine,self.identificator,self.path_main_file,self.path))
         self.process = psutil.Process(self.engine.pid)
         self.process.cpu_affinity(cpu_affinity)
         self.engine.start()
@@ -131,7 +180,7 @@ class Engine_handler:
         """
         Returns True if the engine replies with ("ARBITER","PING-REPLY",(time_ns))
         """
-        self.arbiter_conn.send(("ARBITER","PING",()))
+        self.pipe.arbiter.send(("ARBITER","PING",()))
         
 
     ## Functions to initiate the Main_Engine class in Engine_main.py file - both functions need to be bound (static), as they are already executed in a different process - dont have access to this class
@@ -167,17 +216,17 @@ class Engine_handler:
 
 
     def _receive_data(self,watchdog=2.5):
-        received = mpcon.wait([self.arbiter_conn],watchdog)
-        if self.arbiter_conn in received:
-            return self.arbiter_conn.recv()
+        received = mpcon.wait([self.pipe.arbiter],watchdog)
+        if self.pipe.arbiter in received:
+            return self.pipe.arbiter.recv()
         else: return None
 
     def move_request(self,*arguments):
-        self.arbiter_conn.send(("MOVE",arguments))
+        self.pipe.arbiter.send(("MOVE",arguments))
         return self._receive_data()   
 
     def _close(self):
-        self.arbiter_conn.send(type(None))
+        self.pipe.arbiter.send(type(None))
         self.engine.join()
         print(f"Engine {self.identificator} process closed successfully")
 

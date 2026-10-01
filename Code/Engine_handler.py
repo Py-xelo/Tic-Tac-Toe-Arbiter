@@ -13,38 +13,9 @@ import sys
 import errno
 from dataclasses import dataclass
 import typing
-from enum import Enum, auto
-
 
 from Resources.program_settings import Engine_Handling as engset
-
-
-class ins(Enum): #list of all avaliable public instructions
-    # public functions begin with 1--
-    MOVE = 100
-    PONDER = auto()
-    SETTINGS = auto()
-    RESIGN = auto()
-    
-class arbins(Enum): #list of all avaliable arbiter instructions
-    # Arbiter functions begin with 2--
-    PING = 200
-    PING_REPLY = auto()
-    PIPE_CLOSE = auto()
-    PIPE_CLOSED = auto()
-    INVALID_FUNCTION = auto()
-
-@dataclass
-class Instruction_base: 
-    arg_length: int = 0
-    send_args: typing.Any = None
-    timeout: int | float = 0
-    returns: typing.Any = None
-    is_reply: bool = False
-    engine_first: bool = False
-    arbiter: bool = False
-    sendable: bool = True
-    implemented: bool = True
+from Resources.instructions import ins,arbins,Instruction_base
 
 @dataclass
 class Pipe:
@@ -93,7 +64,7 @@ class Engine_handler:
                  #   raise ValueError(errno.EINVAL,f"requested timeout ({timeout} s) exceeds maximum allowed timeout ({engset.MAX_TIMEOUT} s)")
             except Exception as exc: raise exc
             else:
-                print(f"instruction {instruction} has passed send checks")
+                print(f"{instruction} has passed send checks")
 
             pipe_string = None
             if not param.arbiter:
@@ -148,10 +119,12 @@ class Engine_handler:
         self.process.cpu_affinity(cpu_affinity)
         self.engine.start()
         self.comms.send(arbins.PING,())
+        print(f"Engine {self.identificator} was started successfully")
         received = mpcon.wait([self.pipe.arbiter],engset.MOVE_DEFAULT_TIMEOUT)
         if self.pipe.arbiter in received:
             print(self.pipe.arbiter.recv())
             self._close()
+        
         else: self._terminate()
         
         
@@ -230,9 +203,13 @@ class Engine_handler:
         return self._receive_data()   
 
     def _close(self):
-        self.pipe.arbiter.send(type(None))
-        self.engine.join()
-        print(f"Engine {self.identificator} process closed successfully")
+        try:
+            self.comms.send(arbins.PIPE_CLOSE,())
+        except BrokenPipeError:
+            self._terminate()
+        else:
+            self.engine.join()
+            print(f"Engine {self.identificator} process closed successfully")
 
     def _terminate(self):
         self.engine.terminate()

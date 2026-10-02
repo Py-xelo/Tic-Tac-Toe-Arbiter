@@ -22,11 +22,12 @@ class Pipe:
     arbiter: mpcon.PipeConnection
     engine: mpcon.PipeConnection
     was_closed: bool = True
-    
+
 
 class Engine_handler:
     class Communications:
-        def __init__(self,connection: Pipe):
+        def __init__(self,connection: Pipe, identification: typing.AnyStr):
+            self.identificator = identification
             self.pipe = connection
 
             self.translate = {               
@@ -40,8 +41,9 @@ class Engine_handler:
                 arbins.PING_REPLY : Instruction_base(arg_length=1, returns=int, is_reply=True, arbiter=True, sendable=False),
                 arbins.PIPE_CLOSE : Instruction_base(timeout=engset.ARBITER_DEFAULT_TIMEOUT,arbiter=True),
                 arbins.PIPE_CLOSED : Instruction_base(is_reply=True, arbiter=True, sendable= False),
-                arbins.INVALID_FUNCTION : Instruction_base(arg_length=3, returns=(typing.AnyStr,typing.AnyStr,typing.Tuple), is_reply=True, engine_first=True, arbiter= True)
+                arbins.INSTRUCTION_INVALID : Instruction_base(arg_length=3, returns=(typing.AnyStr,typing.AnyStr,typing.Tuple), is_reply=True, engine_first=True, arbiter= True)
             }
+
 
         def send(self, instruction: ins|arbins, function_args: typing.Tuple):
             try:
@@ -63,15 +65,25 @@ class Engine_handler:
                 #elif timeout > engset.MAX_TIMEOUT:
                  #   raise ValueError(errno.EINVAL,f"requested timeout ({timeout} s) exceeds maximum allowed timeout ({engset.MAX_TIMEOUT} s)")
             except Exception as exc: raise exc
-            else:
-                print(f"{instruction} has passed send checks")
 
             pipe_string = None
             if not param.arbiter:
-                pipe_string = (instruction.name,(function_args))
+                pipe_string = ("REQUEST",instruction.name,(function_args))
             else:
                 pipe_string = ("ARBITER",instruction.name,(function_args))
+
+            print(f"[{self.identificator}]: {instruction} sent {pipe_string} to Engine")
             self.pipe.arbiter.send(pipe_string)
+
+
+        def receive(self, timeout:int=0, ):
+            self._check_pipe()
+
+            if timeout > engset.MAX_TIMEOUT:
+                raise ValueError()
+
+
+        
 
         def _check_pipe(self):
             if not self.pipe.arbiter.closed:
@@ -92,14 +104,19 @@ class Engine_handler:
                 return length
 
 
+
+
+
+
+
     def __init__(self,engine_directory, engine_identificator, cpu_affinity:tuple):
         connection = mpcon.Pipe()
-        self.pipe = Pipe(*connection)
-        self.comms = self.Communications(self.pipe)
+        self.pipe = Pipe(*connection,)
+        self.comms = self.Communications(self.pipe,engine_identificator)
         self.identificator = engine_identificator
 
         if not os.path.isdir(engine_directory): # checks if provided engine directory exists
-            raise ValueError("The engine directory could not be found")
+            raise ValueError(f"[{self.identificator}]: The engine directory could not be found")
         else:
             self.path = engine_directory
 
@@ -109,9 +126,9 @@ class Engine_handler:
                 # communications file match verification
             except Exception as error: raise error 
         
-        self.path_main_file = os.path.join(self.path,"Engine_main.py") #path of the script which will be launched
+        self.path_main_file = os.path.join(self.path,engset.ENGINE_MAINFILE) #path of the script which will be launched
         if not os.path.isfile(self.path_main_file): #checks if the path is valid and a file
-            raise ImportError(f"{engset.ENGINE_MAINFILE} file does not exist or could not be found")
+            raise ImportError(f"[{self.identificator}]: {engset.ENGINE_MAINFILE} file does not exist or could not be found")
  
         
         self.engine = Process(target=Engine_handler._launch_engine_instance,args=(self.pipe.engine,self.identificator,self.path_main_file,self.path))
@@ -119,15 +136,16 @@ class Engine_handler:
         self.process.cpu_affinity(cpu_affinity)
         self.engine.start()
         self.comms.send(arbins.PING,())
-        print(f"Engine {self.identificator} was started successfully")
+        self._test_receive()
+        print(f"[{self.identificator}]: process start success")
+        self._close()
+        
+        
+    def _test_receive(self):
         received = mpcon.wait([self.pipe.arbiter],engset.MOVE_DEFAULT_TIMEOUT)
         if self.pipe.arbiter in received:
-            print(self.pipe.arbiter.recv())
-            self._close()
-        
+            print("received:" ,self.pipe.arbiter.recv())
         else: self._terminate()
-        
-        
 
 
     # Verification, that the Communications file provided by the engine is the same as the Engine_base - (if the versions match)
@@ -142,7 +160,7 @@ class Engine_handler:
                 digested_engine = digested_engine_file.hexdigest()
 
             try:
-                with open(os.path.join(os.getcwd(),"Engine_base",engset.COMMS_FILENAME), "rb") as engine_base_file:
+                with open(os.path.join(os.getcwd(),"Engine_base_files",engset.COMMS_FILENAME), "rb") as engine_base_file:
                     digested_arbiter_file = hashlib.file_digest(engine_base_file, HASH)
                     digested_arbiter = digested_arbiter_file.hexdigest()
             except FileNotFoundError: raise FileNotFoundError(f"Arbiter-side {engset.COMMS_FILENAME} does not exist or could not be found")
@@ -179,14 +197,14 @@ class Engine_handler:
         for name,object_type in avaliable_objects: #checks if the object is a class named Main_Engine
             if inspect.isclass(object_type):
                 class_name = name.casefold()
-                if class_name.casefold() == ("main_engine"): # if it is, the class type is as the class that will be initiated
+                if class_name == (engset.ENGINE_MAINCLASS).casefold(): # if it is, the class type is as the class that will be initiated
                     if not main_engine_class:
                         main_engine_class = object_type
                     else: # or if there are multiple classes named the same way, nothing will be executed and error will be raised
-                        raise ImportError(f"{identification} contains multiple instances of classes named 'Main_Engine'")
+                        raise ImportError(f"[{identification}]: contains multiple instances of classes named '{engset.ENGINE_MAINCLASS}'")
         else:
             if not main_engine_class:
-                raise ImportError(f"{identification} contains no instance of a class named 'Main_Engine")
+                raise ImportError(f"[{identification}]: contains no instance of a class named 'Main_Engine")
             else:
                 main_engine_class(pipe_connection)
 
@@ -209,8 +227,7 @@ class Engine_handler:
             self._terminate()
         else:
             self.engine.join()
-            print(f"Engine {self.identificator} process closed successfully")
+            print(f"[{self.identificator}]: process closed")
 
     def _terminate(self):
-        self.engine.terminate()
-        print(f"Engine {self.identificator} process forcefully terminated")
+        self.process.kill()

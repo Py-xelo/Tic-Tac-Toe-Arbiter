@@ -15,7 +15,7 @@ class arbins(Enum): #list of all avaliable arbiter instructions
     PING_REPLY = auto()
     PIPE_CLOSE = auto()
     PIPE_CLOSED = auto()
-    INVALID_FUNCTION = auto()
+    INSTRUCTION_INVALID = auto()
 
 @dataclass
 class Instruction_base: 
@@ -28,3 +28,4 @@ class Instruction_base:
     arbiter: bool = False
     sendable: bool = True
     implemented: bool = True
+    function_to_call: typing.Callable | None = None

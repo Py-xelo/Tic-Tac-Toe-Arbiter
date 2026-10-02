@@ -38,6 +38,7 @@ engines = Engine_instance_management()
 
 def engine_instance_start(engine_id):
     instance_data = engines.get_data(engine_id)
+    print(f"[{instance_data[0]}]: instance created from path: {instance_data[1]}")
     return Engine_handler(os.path.join(engines.path,instance_data[1]),instance_data[0],(0,1))
 
 if __name__ == "__main__":

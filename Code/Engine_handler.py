@@ -23,26 +23,45 @@ class Pipe:
     engine: mpcon.PipeConnection
     was_closed: bool = True
 
+@dataclass
+class Request:
+    denominator: typing.AnyStr
+    instruction: ins | arbins
+    parameters: Instruction_base
+    arguments: typing.Tuple
+
+@dataclass
+class Last_Instruction:
+    code: ins | arbins = None
+    parameters: Instruction_base = None
+    arguments: int | typing.Tuple | None = None
 
 class Engine_handler:
     class Communications:
         def __init__(self,connection: Pipe, identification: typing.AnyStr):
             self.identificator = identification
             self.pipe = connection
+            self.last_instruction = Last_Instruction()
 
             self.translate = {               
                     # Public facing functions declarations
-                ins.MOVE : Instruction_base(arg_length=0,returns=(NotImplemented),timeout=engset.MOVE_DEFAULT_TIMEOUT),
+                ins.MOVE : Instruction_base(arg_length=0,returns=(NotImplemented),timeout=engset.MOVE_DEFAULT_TIMEOUT,reply=ins.MOVE),
                 ins.PONDER : Instruction_base(implemented=False),
                 ins.SETTINGS : Instruction_base(implemented=False),
                 ins.RESIGN : Instruction_base(engine_first=True, sendable= False),
                     # Arbiter functions declarations
                 arbins.PING : Instruction_base(timeout = engset.ARBITER_DEFAULT_TIMEOUT, returns=arbins.PING_REPLY, arbiter=True),
-                arbins.PING_REPLY : Instruction_base(arg_length=1, returns=int, is_reply=True, arbiter=True, sendable=False),
+                arbins.PING_REPLY : Instruction_base(arg_length=1, returns=int, reply=arbins.PING, arbiter=True, sendable=False),
                 arbins.PIPE_CLOSE : Instruction_base(timeout=engset.ARBITER_DEFAULT_TIMEOUT,arbiter=True),
-                arbins.PIPE_CLOSED : Instruction_base(is_reply=True, arbiter=True, sendable= False),
-                arbins.INSTRUCTION_INVALID : Instruction_base(arg_length=3, returns=(typing.AnyStr,typing.AnyStr,typing.Tuple), is_reply=True, engine_first=True, arbiter= True)
+                arbins.PIPE_CLOSED : Instruction_base(reply=arbins.PIPE_CLOSE, arbiter=True, sendable= False),
+                arbins.INSTRUCTION_INVALID : Instruction_base(arg_length=3, returns=(typing.AnyStr,typing.AnyStr,typing.Tuple), reply=True, engine_first=True, arbiter= True, sendable=False)
             }
+
+            # automatically assigns the string version of the instruction to its respective instruction object
+            for code in ins:
+                self.translate[code].string_code = code.name
+            for code in arbins:
+                self.translate[code].string_code = code.name
 
 
         def send(self, instruction: ins|arbins, function_args: typing.Tuple):
@@ -73,17 +92,52 @@ class Engine_handler:
                 pipe_string = ("ARBITER",instruction.name,(function_args))
 
             print(f"[{self.identificator}]: {instruction} sent {pipe_string} to Engine")
+            self.last_instruction.code = instruction
+            self.last_instruction.arguments = function_args
+            self.last_instruction.parameters = param
             self.pipe.arbiter.send(pipe_string)
 
 
-        def receive(self, timeout:int=0, ):
+        
+        def receive(self, timeout:int=0, ): # FINISH ERRORS
             self._check_pipe()
 
             if timeout > engset.MAX_TIMEOUT:
+                raise ValueError() 
+
+            received_packet = mpcon.wait([self.pipe.arbiter],timeout=timeout) #waits for packet receive - if 0, waits indefinitely
+            if self.pipe.arbiter in received_packet:
+                unverified_instruction = self.pipe.arbiter.recv()
+            else:
+                raise ConnectionError()
+
+            instruction_code = self._find_instruction_from_string(unverified_instruction[1])
+            if not instruction_code:
                 raise ValueError()
+            
+            request = Request(unverified_instruction[0],instruction_code,self.translate[instruction_code],unverified_instruction[2])
+
+            if request.denominator == "ARBITER":
+                return self._verify_arbiter(request)
+            else:
+                raise NotImplementedError
+
+        def _verify_arbiter(self,request : Request):
+            pass
 
 
-        
+        def _find_instruction_from_string(self,string_to_search):
+            values = self.translate.values()
+            at_index = 0
+            for item in values:
+                if string_to_search == item.string_code:
+                    keys = self.translate.keys()
+                    return list(keys)[at_index]
+                else:
+                    at_index += 1
+            else:
+                return None
+
 
         def _check_pipe(self):
             if not self.pipe.arbiter.closed:
@@ -130,7 +184,6 @@ class Engine_handler:
         if not os.path.isfile(self.path_main_file): #checks if the path is valid and a file
             raise ImportError(f"[{self.identificator}]: {engset.ENGINE_MAINFILE} file does not exist or could not be found")
  
-        
         self.engine = Process(target=Engine_handler._launch_engine_instance,args=(self.pipe.engine,self.identificator,self.path_main_file,self.path))
         self.process = psutil.Process(self.engine.pid)
         self.process.cpu_affinity(cpu_affinity)
@@ -138,14 +191,14 @@ class Engine_handler:
         self.comms.send(arbins.PING,())
         self._test_receive()
         print(f"[{self.identificator}]: process start success")
-        self._close()
+        self._terminate_engine()
         
         
     def _test_receive(self):
         received = mpcon.wait([self.pipe.arbiter],engset.MOVE_DEFAULT_TIMEOUT)
         if self.pipe.arbiter in received:
             print("received:" ,self.pipe.arbiter.recv())
-        else: self._terminate()
+        else: self._terminate_engine()
 
 
     # Verification, that the Communications file provided by the engine is the same as the Engine_base - (if the versions match)
@@ -220,14 +273,16 @@ class Engine_handler:
         self.pipe.arbiter.send(("MOVE",arguments))
         return self._receive_data()   
 
-    def _close(self):
-        try:
-            self.comms.send(arbins.PIPE_CLOSE,())
-        except BrokenPipeError:
-            self._terminate()
-        else:
-            self.engine.join()
-            print(f"[{self.identificator}]: process closed")
+    def _terminate_engine(self):
+        if not self.pipe.arbiter.closed:
+            self.pipe.arbiter.close()
+            self.pipe.was_closed = True
+        print(f"[{self.identificator}]: terminating engine")
+        children = self.process.children(True)
+        for process in children:
+            try:
+                process.terminate()
+            except psutil.NoSuchProcess:
+                pass
+        print(f"[{self.identificator}]: terminated")
 
-    def _terminate(self):
-        self.process.kill()

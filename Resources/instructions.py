@@ -19,11 +19,12 @@ class arbins(Enum): #list of all avaliable arbiter instructions
 
 @dataclass
 class Instruction_base: 
+    string_code: typing.AnyStr = None
     arg_length: int = 0
     send_args: typing.Any = None
     timeout: int | float = 0
     returns: typing.Any = None
-    is_reply: bool = False
+    reply: bool | ins | arbins = False 
     engine_first: bool = False
     arbiter: bool = False
     sendable: bool = True

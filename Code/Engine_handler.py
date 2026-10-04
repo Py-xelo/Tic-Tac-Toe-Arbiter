@@ -117,13 +117,22 @@ class Engine_handler:
             
             request = Request(unverified_instruction[0],instruction_code,self.translate[instruction_code],unverified_instruction[2])
 
+            if request.parameters.reply == True and self.last_instruction.parameters.reply == False:
+                raise ValueError
+            elif request.parameters.reply == False and self.last_instruction.parameters.reply == True:
+                raise ValueError
+
             if request.denominator == "ARBITER":
                 return self._verify_arbiter(request)
             else:
                 raise NotImplementedError
 
+        # fix errors
         def _verify_arbiter(self,request : Request):
-            pass
+            if not request.parameters.arbiter:
+                raise ValueError
+
+
 
 
         def _find_instruction_from_string(self,string_to_search):

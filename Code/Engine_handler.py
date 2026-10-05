@@ -44,7 +44,16 @@ class Engine_handler:
             }
 
         def send(self, instruction: ins|arbins, function_args: typing.Tuple):
-            try:
+            """
+            Verifies, then sends the requested instruction and its arguments to the Arbiter_comms\n
+            -If something is amiss, this function raises an exception with a specific error code\n
+
+            Allows for sending both public and arbiter instructions (ins / arbins)
+            """
+
+            # checks the current status of the pipe connection object
+                # if nothing fails fetches the parameters for the function and the inputted length of args
+            try: 
                 self._check_pipe()
             except Exception as exc: raise exc
             else:
@@ -52,13 +61,14 @@ class Engine_handler:
                 send_arg_length = self._determine_length(function_args)
 
             try:
-                if param == KeyError:
+                # Checks too see if all parameters are correct, raises specific exception if not
+                if param == KeyError: # if the raised instruction doesnt exist
                     raise KeyError(errno.ENXIO,"Requested function does not exist")
                 elif not param.implemented:
                     raise NotImplementedError(errno.ENOSYS,f"The functionality for {instruction} was not yet implemented")
                 elif not param.sendable:
                     raise TypeError(errno.ESPIPE,f"instruction {instruction.name} cannot be sent to Engine")
-                elif send_arg_length != param.arg_length:
+                elif send_arg_length != param.arg_length: #given argument length and expected argument length dont match
                     raise ValueError(errno.E2BIG,f"instruction {instruction.name} expects {param.arg_length} args, but {send_arg_length} were received")
                 #elif timeout > engset.MAX_TIMEOUT:
                  #   raise ValueError(errno.EINVAL,f"requested timeout ({timeout} s) exceeds maximum allowed timeout ({engset.MAX_TIMEOUT} s)")
@@ -82,6 +92,12 @@ class Engine_handler:
                 raise BrokenPipeError(errno.ECONNREFUSED,"Pipe was closed without previous instruction")
 
         def _determine_length(self,function_arguments):
+                """
+                Determines the length of the functions argument tuple
+                Tuple - returns its len()
+                Int,Float - returns 1
+                other - returns None
+                """
                 if isinstance(function_arguments,(list,tuple)):
                     length = len(function_arguments)
                 elif isinstance(function_arguments,(int,float)):

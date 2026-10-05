@@ -22,7 +22,7 @@ class Main_Engine:
 
             
     def check_move(self):
-        print(NotImplemented)
+        raise NotImplementedError()
 
     def ponder(self):
-        NotImplemented
+        raise NotImplementedError()

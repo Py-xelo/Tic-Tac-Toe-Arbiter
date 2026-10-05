@@ -5,4 +5,5 @@ class Engine_Handling:
 
     ENGINE_FOLDERNAME = "Engines"
     COMMS_FILENAME = "Arbiter_communications.py"
-    ENGINE_MAINFILE = "Engine_main.py"
+    ENGINE_MAINFILE = "Engine_base.py"
+    ENGINE_MAINCLASS = "Engine_Base_class"

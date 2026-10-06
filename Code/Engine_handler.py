@@ -32,6 +32,9 @@ class Request:
 
 @dataclass
 class Last_Instruction:
+    """
+    Basic parameters of the last intruction both sent and received
+    """
     code: ins | arbins = None
     parameters: Instruction_base = None
     arguments: int | typing.Tuple | None = None
@@ -41,7 +44,8 @@ class Engine_handler:
         def __init__(self,connection: Pipe, identification: typing.AnyStr):
             self.identificator = identification
             self.pipe = connection
-            self.last_instruction = Last_Instruction()
+            self.last_tx = Last_Instruction()
+            self.last_rx = Last_Instruction()
 
             self.translate = {               
                     # Public facing functions declarations
@@ -102,9 +106,9 @@ class Engine_handler:
                 pipe_string = ("ARBITER",instruction.name,(function_args))
 
             print(f"[{self.identificator}]: {instruction} sent {pipe_string} to Engine")
-            self.last_instruction.code = instruction
-            self.last_instruction.arguments = function_args
-            self.last_instruction.parameters = param
+            self.last_tx.code = instruction
+            self.last_tx.arguments = function_args
+            self.last_tx.parameters = param
             self.pipe.arbiter.send(pipe_string)
 
 
@@ -127,21 +131,38 @@ class Engine_handler:
             
             request = Request(unverified_instruction[0],instruction_code,self.translate[instruction_code],unverified_instruction[2])
 
-            if request.parameters.reply == True and self.last_instruction.parameters.reply == False:
-                raise ValueError
-            elif request.parameters.reply == False and self.last_instruction.parameters.reply == True:
-                raise ValueError
+            try:
+                if not request.parameters.reply and not request.parameters.engine_first:
+                    raise ValueError
+                    # if receive is not a reply and also cannot be sent by the engine first
+                    # a receive must be either a reply or be engine_first - there is no instruction which behaves differently
+                if request.parameters.engine_first:
+                    raise StopIteration
+                    # if the received instruction is supposed an engine_first call, handle separately
+                
+                if request.denominator == "REQUEST":
+                    raise ValueError
+                    # since all engine_first instruction are now excluded, it must be either "reply" or "arbiter"
+                else:
+                    if request.denominator == "ARBITER" and not request.parameters.arbiter:
+                        raise ValueError
+                        # Engine wants arbiter processing, however the request parameters dont allow it.
+                    elif request.denominator == "REPLY" and not self.last_tx.parameters.reply:
+                        raise ValueError
+                        # receive is a reply, however last sent instruction does not expect a reply
+    
+                                        
+                if request.instruction != self.last_tx.parameters.reply:
+                    raise ValueError
+                    # if the receive is a reply, but doesnt match with reply condition last sent instruction expects 
+                
+                    
+            except StopIteration: self._handle_engine_first()
+            except Exception as err: raise err
 
-            if request.denominator == "ARBITER":
-                return self._verify_arbiter(request)
-            else:
-                raise NotImplementedError
-
-        # fix errors
-        def _verify_arbiter(self,request : Request):
-            if not request.parameters.arbiter:
-                raise ValueError
-
+            
+        def _handle_engine_first(self,request):
+            pass
 
 
 

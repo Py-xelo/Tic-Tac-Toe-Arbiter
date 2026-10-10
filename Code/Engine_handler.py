@@ -113,11 +113,11 @@ class Engine_handler:
 
 
         
-        def receive(self, timeout:int=0, ): # FINISH ERRORS
+        def receive(self, timeout:int=engset.MAX_TIMEOUT): # FINISH ERRORS
             self._check_pipe()
 
             if timeout > engset.MAX_TIMEOUT:
-                raise ValueError() 
+                raise ValueError 
 
             received_packet = mpcon.wait([self.pipe.arbiter],timeout=timeout) #waits for packet receive - if 0, waits indefinitely
             if self.pipe.arbiter in received_packet:
@@ -125,10 +125,14 @@ class Engine_handler:
             else:
                 raise ConnectionError()
 
+            if len(unverified_instruction) != 3:
+                raise ValueError
+            elif type(unverified_instruction[0]) != str or type(unverified_instruction[1]) != str:
+                raise ValueError
+
             instruction_code = self._find_instruction_from_string(unverified_instruction[1])
             if not instruction_code:
                 raise ValueError()
-            
             request = Request(unverified_instruction[0],instruction_code,self.translate[instruction_code],unverified_instruction[2])
 
             try:
@@ -150,20 +154,27 @@ class Engine_handler:
                     elif request.denominator == "REPLY" and not self.last_tx.parameters.reply:
                         raise ValueError
                         # receive is a reply, however last sent instruction does not expect a reply
-    
-                                        
-                if request.instruction != self.last_tx.parameters.reply:
+                                            
+                if request.instruction != self.last_tx.parameters.returns:
+                    print(request.instruction, self.last_tx.parameters.returns)
                     raise ValueError
                     # if the receive is a reply, but doesnt match with reply condition last sent instruction expects 
-                
-                    
+                elif self._determine_length(request.arguments) != request.parameters.arg_length:
+                    raise ValueError
+                    # argument length of the receive does not match expected length
+                                   
             except StopIteration: self._handle_engine_first()
-            except Exception as err: raise err
+            except ValueError: return ValueError
+            except Exception as critical_error:
+                raise critical_error
+
+            print(f"{self.identificator}: Received instruction: {unverified_instruction}")
+            return request
 
             
         def _handle_engine_first(self,request):
-            pass
-
+            print("handle engine_first")
+            raise RuntimeError
 
 
         def _find_instruction_from_string(self,string_to_search):
@@ -235,7 +246,7 @@ class Engine_handler:
         self.process.cpu_affinity(cpu_affinity)
         self.engine.start()
         self.comms.send(arbins.PING,())
-        self._test_receive()
+        self.comms.receive()
         print(f"[{self.identificator}]: process start success")
         self._terminate_engine()
         
@@ -243,7 +254,9 @@ class Engine_handler:
     def _test_receive(self):
         received = mpcon.wait([self.pipe.arbiter],engset.MOVE_DEFAULT_TIMEOUT)
         if self.pipe.arbiter in received:
-            print("received:" ,self.pipe.arbiter.recv())
+            message = self.pipe.arbiter.recv()
+            print("received:" ,message)
+            print(type(message[0]),type(message[1]))
         else: self._terminate_engine()
 
 

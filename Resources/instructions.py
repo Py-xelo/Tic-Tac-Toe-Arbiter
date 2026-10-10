@@ -24,7 +24,7 @@ class Instruction_base:
     send_args: typing.Any = None
     timeout: int | float = 0
     returns: typing.Any = None
-    reply: bool | ins | arbins = False 
+    reply: ins | arbins = False 
     engine_first: bool = False
     arbiter: bool = False
     sendable: bool = True

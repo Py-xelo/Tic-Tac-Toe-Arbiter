@@ -23,21 +23,6 @@ class Pipe:
     engine: mpcon.PipeConnection
     was_closed: bool = True
 
-@dataclass
-class Request:
-    denominator: typing.AnyStr
-    instruction: ins | arbins
-    parameters: Instruction_base
-    arguments: typing.Tuple
-
-@dataclass
-class Last_Instruction:
-    """
-    Basic parameters of the last intruction both sent and received
-    """
-    code: ins | arbins = None
-    parameters: Instruction_base = None
-    arguments: int | typing.Tuple | None = None
 
 class Engine_handler():
     def __init__(self,engine_directory, engine_identificator, cpu_affinity:tuple):
@@ -51,7 +36,7 @@ class Engine_handler():
         else:
             self.path = engine_directory
 
-        if False: # just my switch cuz outside normal functionality this is annoying af
+        if False: # dev switch cuz outside normal functionality this is annoying af
             try: 
                 self._verify_comms_file() 
                 # communications file match verification
@@ -65,10 +50,9 @@ class Engine_handler():
         self.process = psutil.Process(self.engine.pid)
         self.process.cpu_affinity(cpu_affinity)
         self.engine.start()
-        self.comms.send(arbins.PING,())
+        if not self.comms.send(arbins.PING,()):
+            raise 
         self.comms.receive()
-        print(f"[{self.identificator}]: process start success")
-        self._terminate_engine()
         
         
     def _test_receive(self):
@@ -161,12 +145,23 @@ class Engine_handler():
         else: return None
 
 
+@dataclass
+class Request:
+    denominator: typing.AnyStr
+    instruction: ins | arbins
+    parameters: Instruction_base
+    arguments: typing.Tuple
+    pipe_string: typing.AnyStr = None
+
+
+
+
 class Communications(Engine_handler):
     def __init__(self,connection: Pipe, identification: typing.AnyStr):
         self.identificator = identification
         self.pipe = connection
-        self.last_tx = Last_Instruction()
-        self.last_rx = Last_Instruction()
+        self.last_tx = Request(None,None,None,None,None)
+        self.last_rx = Request(None,None,None,None,None)
 
         self.translate = {               
                 # Public facing functions declarations
@@ -188,8 +183,19 @@ class Communications(Engine_handler):
         for code in arbins:
             self.translate[code].string_code = code.name
 
+    def send(self,instruction: ins|arbins, function_args: typing.Tuple):
+        try:
+            self.send_wrapper(instruction,function_args)
+        except AttributeError:
+            self._terminate_engine()
+            return False
+        except:
+            pass
+        else:
+            return True
 
-    def send(self, instruction: ins|arbins, function_args: typing.Tuple):
+
+    def send_wrapper(self, instruction: ins|arbins, function_args: typing.Tuple):
         """
         Verifies, then sends the requested instruction and its arguments to the Arbiter_comms\n
         -If something is amiss, this function raises an exception with a specific error code\n
@@ -200,42 +206,36 @@ class Communications(Engine_handler):
         # checks the current status of the pipe connection object
             # if nothing fails fetches the parameters for the function and the inputted length of args
         try: 
-            self._check_pipe()
+            pipe_state =self._verify_open_pipe()
+            if pipe_state == False:
+                raise ValueError
+            elif isinstance(pipe_state,BrokenPipeError):
+                raise AttributeError
             param = self.translate[instruction]
-        except Exception as exc: raise exc
+        except (AttributeError, KeyError) as exc: raise AttributeError(exc)
+        except Exception as er: raise er
         else:
-            param = self.translate.get(instruction,KeyError)
-            if not param == KeyError:
-                if param.arbiter:
-                    request = Request("ARBITER",param.string_code,param,function_args)
-            send_arg_length = self._determine_length(function_args)
-
+            if param.arbiter:
+                denominator = "ARBITER"
+            else: 
+                denominator = "REQUEST"
+            request = Request(denominator,instruction,param,function_args)
+            request.pipe_string = (denominator,instruction.name,function_args)
+            send_arg_length = self._determine_length(request.arguments)
 
         try:
             # Checks too see if all parameters are correct, raises specific exception if not
-            if param == KeyError: # if the raised instruction doesnt exist
-                raise KeyError(errno.ENXIO,"Requested function does not exist")
-            elif not param.implemented:
-                raise NotImplementedError(errno.ENOSYS,f"The functionality for {instruction} was not yet implemented")
-            elif not param.sendable:
-                raise TypeError(errno.ESPIPE,f"instruction {instruction.name} cannot be sent to Engine")
-            elif send_arg_length != param.arg_length: #given argument length and expected argument length dont match
-                raise ValueError(errno.E2BIG,f"instruction {instruction.name} expects {param.arg_length} args, but {send_arg_length} were received")
-            #elif timeout > engset.MAX_TIMEOUT:
-                #   raise ValueError(errno.EINVAL,f"requested timeout ({timeout} s) exceeds maximum allowed timeout ({engset.MAX_TIMEOUT} s)")
+            if not request.parameters.implemented:
+                raise ValueError
+            elif not request.parameters.sendable:
+                raise ValueError
+            elif send_arg_length != request.parameters.arg_length: #given argument length and expected argument length dont match
+                raise ValueError
         except Exception as exc: raise exc
 
-        pipe_string = None
-        if not param.arbiter:
-            pipe_string = ("REQUEST",instruction.name,(function_args))
-        else:
-            pipe_string = ("ARBITER",instruction.name,(function_args))
-
-        print(f"[{self.identificator}]: {instruction} sent instruction: {pipe_string}")
-        self.last_tx.code = instruction
-        self.last_tx.arguments = function_args
-        self.last_tx.parameters = param
-        self.pipe.arbiter.send(pipe_string)
+        print(f"[{self.identificator}]: {instruction} sent instruction: {request.pipe_string}")
+        self.last_tx = request
+        self.pipe.arbiter.send(request.pipe_string)
 
     def receive(self, timeout: int = engset.MAX_TIMEOUT):
         try:
@@ -243,9 +243,11 @@ class Communications(Engine_handler):
                 raise Exception
             receive = self._get_and_verify(timeout=timeout)
         except AttributeError:
-
+            self._terminate_engine()
+            print(f"[{self.identificator}]: WARNING: Determined Engine-Error on instruction receive. Engine terminated")
             return None
-        except Exception:
+        except ValueError:
+            print(f"[{self.identificator}]: WARNING: Determined Arbiter-Error on instruction receive")
             return None
         else:
             return receive
@@ -253,7 +255,11 @@ class Communications(Engine_handler):
 
     
     def _get_and_verify(self, timeout): # FINISH ERRORS
-        self._check_pipe()
+        pipe_state =self._verify_open_pipe()
+        if pipe_state == False:
+            raise ValueError
+        elif isinstance(pipe_state,BrokenPipeError):
+            raise AttributeError
 
         received_packet = mpcon.wait([self.pipe.arbiter],timeout=timeout) #waits for packet receive - if 0, waits indefinitely
         if self.pipe.arbiter in received_packet:
@@ -325,11 +331,11 @@ class Communications(Engine_handler):
             return None
 
 
-    def _check_pipe(self):
+    def _verify_open_pipe(self):
         if not self.pipe.arbiter.closed:
-            pass
-        elif self.pipe.arbiter.closed != self.pipe.was_closed:
-            raise ValueError(errno.ENOTCONN,"Pipe to engine is closed!")
+            return True
+        elif self.pipe.arbiter.closed == self.pipe.was_closed:
+            return False
         else:
             raise BrokenPipeError(errno.ECONNREFUSED,"Pipe was closed without previous instruction")
 

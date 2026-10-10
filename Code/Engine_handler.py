@@ -13,6 +13,7 @@ import sys
 import errno
 from dataclasses import dataclass
 import typing
+import traceback
 
 from Resources.program_settings import Engine_Handling as engset
 from Resources.instructions import ins,arbins,Instruction_base
@@ -53,16 +54,7 @@ class Engine_handler():
         if not self.comms.send(arbins.PING,()):
             raise 
         self.comms.receive()
-        
-        
-    def _test_receive(self):
-        received = mpcon.wait([self.pipe.arbiter],engset.MOVE_DEFAULT_TIMEOUT)
-        if self.pipe.arbiter in received:
-            message = self.pipe.arbiter.recv()
-            print("received:" ,message)
-            print(type(message[0]),type(message[1]))
-        else: self._terminate_engine()
-
+    
 
     # Verification, that the Communications file provided by the engine is the same as the Engine_base - (if the versions match)
     def _verify_comms_file(self):
@@ -138,20 +130,14 @@ class Engine_handler():
             print(f"[{self.identificator}]: terminated")
 
 
-    def _receive_data(self,watchdog=2.5):
-        received = mpcon.wait([self.pipe.arbiter],watchdog)
-        if self.pipe.arbiter in received:
-            return self.pipe.arbiter.recv()
-        else: return None
-
 
 @dataclass
 class Request:
-    denominator: typing.AnyStr
+    denominator: typing.LiteralString
     instruction: ins | arbins
     parameters: Instruction_base
     arguments: typing.Tuple
-    pipe_string: typing.AnyStr = None
+    pipe_string: typing.LiteralString = None
 
 
 
@@ -240,14 +226,16 @@ class Communications(Engine_handler):
     def receive(self, timeout: int = engset.MAX_TIMEOUT):
         try:
             if timeout > engset.MAX_TIMEOUT:
-                raise Exception
+                raise ValueError("set timeout exceeds maximum allowed timeout")
             receive = self._get_and_verify(timeout=timeout)
         except AttributeError:
             self._terminate_engine()
             print(f"[{self.identificator}]: WARNING: Determined Engine-Error on instruction receive. Engine terminated")
+            traceback.print_exc(-1)
             return None
         except ValueError:
             print(f"[{self.identificator}]: WARNING: Determined Arbiter-Error on instruction receive")
+            traceback.print_exc(-1)
             return None
         else:
             return receive
@@ -275,11 +263,11 @@ class Communications(Engine_handler):
         instruction_code = self._find_instruction_from_string(unverified_instruction[1])
         if not instruction_code:
             raise AttributeError()
-        request = Request(unverified_instruction[0],instruction_code,self.translate[instruction_code],unverified_instruction[2])
+        request = Request(unverified_instruction[0],instruction_code,self.translate[instruction_code],unverified_instruction[2],unverified_instruction)
 
         try:
             if not request.parameters.reply and not request.parameters.engine_first:
-                raise AttributeError
+                raise AttributeError("receive must be either a reply, an arbiter request, or allow engine_first")
                 # if receive is not a reply and also cannot be sent by the engine first
                 # a receive must be either a reply or be engine_first - there is no instruction which behaves differently
             if request.parameters.engine_first:
@@ -287,11 +275,11 @@ class Communications(Engine_handler):
                 # if the received instruction is supposed an engine_first call, handle separately
             
             if request.denominator == "REQUEST":
-                raise AttributeError
+                raise AttributeError(f"reply receive expects 'reply' or 'arbiter', not {request.denominator}")
                 # since all engine_first instruction are now excluded, it must be either "reply" or "arbiter"
             else:
                 if request.denominator == "ARBITER" and not request.parameters.arbiter:
-                    raise AttributeError
+                    raise AttributeError(f"{request.instruction} cannot be handled as an Arbiter request")
                     # Engine wants arbiter processing, however the request parameters dont allow it.
                 elif request.denominator == "REPLY" and not self.last_tx.parameters.reply:
                     raise AttributeError

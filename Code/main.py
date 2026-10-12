@@ -33,24 +33,31 @@ class Engine_instance_management:
         """ 
         returned_value = self.engine_dict.get(engine_id,Exception)
         if returned_value == Exception:
-            raise KeyError("Requested key does not exist")
+            raise KeyError("Requested engine identificator does not exist")
         else:
             return returned_value
 
 engines = Engine_instance_management()
 
 def engine_instance_start(engine_id):
-    instance_data = engines.get_data(engine_id)
-    print(f"[{instance_data[0]}]: instance created from path: {instance_data[1]}")
-    return Engine_handler(os.path.join(engines.path,instance_data[1]),instance_data[0],(0,1))
+    
+    try:
+        instance_data = engines.get_data(engine_id)
+        print(f"[{instance_data[0]}]: instance created from path: {instance_data[1]}")
+        return Engine_handler(os.path.join(engines.path,instance_data[1]),instance_data[0],(0,1))
+    except Exception:
+        print(f"[{id_1}]: ENGINE INITIATION FAILED!")
+        traceback.print_exc(-2)
+        return None
 
 if __name__ == "__main__":
     try:
         id_1 = 0
         engine_instance = engine_instance_start(id_1)
+        if not engine_instance:
+            raise RuntimeError()
     except Exception as e:
-        print(f"[{id_1}]: ENGINE INITIATION FAILED!")
-        traceback.print_exc(-2)
+        print(e)
     else:
         print(f"[{id_1}]: Engine started and ready")
         try:

@@ -28,7 +28,7 @@ class Pipe:
 class Engine_handler():
     def __init__(self,engine_directory, engine_identificator, cpu_affinity:tuple):
         connection = mpcon.Pipe()
-        self.pipe = Pipe(*connection,)
+        self.pipe = Pipe(*connection)
         self.comms = Communications(self.pipe,engine_identificator)
         self.identificator = engine_identificator
 
@@ -154,13 +154,13 @@ class Communications(Engine_handler):
             ins.MOVE : Instruction_base(arg_length=0,returns=(NotImplemented),timeout=engset.MOVE_DEFAULT_TIMEOUT,reply=ins.MOVE),
             ins.PONDER : Instruction_base(implemented=False),
             ins.SETTINGS : Instruction_base(implemented=False),
-            ins.RESIGN : Instruction_base(engine_first=True, sendable= False),
+            ins.RESIGN : Instruction_base(engine_first=True, sendable= False,function_to_call=self._resign),
                 # Arbiter functions declarations
             arbins.PING : Instruction_base(timeout = engset.ARBITER_DEFAULT_TIMEOUT, returns=arbins.PING_REPLY, arbiter=True),
             arbins.PING_REPLY : Instruction_base(arg_length=1, returns=int, reply=arbins.PING, arbiter=True, sendable=False),
             arbins.PIPE_CLOSE : Instruction_base(timeout=engset.ARBITER_DEFAULT_TIMEOUT,arbiter=True),
             arbins.PIPE_CLOSED : Instruction_base(reply=arbins.PIPE_CLOSE, arbiter=True, sendable= False),
-            arbins.INSTRUCTION_INVALID : Instruction_base(arg_length=3, returns=(typing.AnyStr,typing.AnyStr,typing.Tuple), reply=True, engine_first=True, arbiter= True, sendable=False)
+            arbins.INSTRUCTION_INVALID : Instruction_base(arg_length=3, returns=(typing.AnyStr,typing.AnyStr,typing.Tuple), reply=True, engine_first=True, arbiter= True, sendable=False, function_to_call=self._invalid_function_solve)
         }
 
         # automatically assigns the string version of the instruction to its respective instruction object
@@ -169,14 +169,18 @@ class Communications(Engine_handler):
         for code in arbins:
             self.translate[code].string_code = code.name
 
+    ## SEND AND RECEIVE FUNCTIONS
+
     def send(self,instruction: ins|arbins, function_args: typing.Tuple):
         try:
             self.send_wrapper(instruction,function_args)
         except AttributeError:
+            traceback.print_exc(-3)
             self._terminate_engine()
             return False
-        except:
-            pass
+        except Exception:
+            traceback.print_exc(-3)
+            return False
         else:
             return True
 
@@ -223,6 +227,7 @@ class Communications(Engine_handler):
         self.last_tx = request
         self.pipe.arbiter.send(request.pipe_string)
 
+
     def receive(self, timeout: int = engset.MAX_TIMEOUT):
         try:
             if timeout > engset.MAX_TIMEOUT:
@@ -230,7 +235,7 @@ class Communications(Engine_handler):
             receive = self._get_and_verify(timeout=timeout)
         except AttributeError:
             self._terminate_engine()
-            print(f"[{self.identificator}]: WARNING: Determined Engine-Error on instruction receive. Engine terminated")
+            print(f"[{self.identificator}]: ERROR: Determined Engine-Error on instruction receive. Engine terminated")
             traceback.print_exc(-1)
             return None
         except ValueError:
@@ -241,7 +246,6 @@ class Communications(Engine_handler):
             return receive
 
 
-    
     def _get_and_verify(self, timeout): # FINISH ERRORS
         pipe_state =self._verify_open_pipe()
         if pipe_state == False:
@@ -255,19 +259,22 @@ class Communications(Engine_handler):
         else:
             return None
 
-        if len(unverified_instruction) != 3:
-            raise AttributeError
+        if self._determine_length(unverified_instruction) != 3:
+            raise AttributeError(f"Arbiter expects an instruction call with length of 3, received: {self._determine_length(unverified_instruction)}")
         elif type(unverified_instruction[0]) != str or type(unverified_instruction[1]) != str:
-            raise AttributeError
+            raise AttributeError("Denominator or instruction parameter type must be a string")
 
         instruction_code = self._find_instruction_from_string(unverified_instruction[1])
         if not instruction_code:
-            raise AttributeError()
+            raise AttributeError("Received instruction code is not a valid instruction")
         request = Request(unverified_instruction[0],instruction_code,self.translate[instruction_code],unverified_instruction[2],unverified_instruction)
 
         try:
+            if not request.parameters.implemented:
+                raise AttributeError("Received instruction is not implemented")
+
             if not request.parameters.reply and not request.parameters.engine_first:
-                raise AttributeError("receive must be either a reply, an arbiter request, or allow engine_first")
+                raise AttributeError("receive must be a reply, an arbiter request, or allow engine_first")
                 # if receive is not a reply and also cannot be sent by the engine first
                 # a receive must be either a reply or be engine_first - there is no instruction which behaves differently
             if request.parameters.engine_first:
@@ -292,7 +299,8 @@ class Communications(Engine_handler):
                 raise AttributeError
                 # argument length of the receive does not match expected length
                                 
-        except StopIteration: self._handle_engine_first()
+        except StopIteration:
+            return self._handle_engine_first()
         except Exception as e: raise e
         else:
             print(f"[{self.identificator}]: Received instruction {request.instruction}: {unverified_instruction}")
@@ -301,10 +309,30 @@ class Communications(Engine_handler):
 
         
     def _handle_engine_first(self,request: Request):
-        if request.arguments[2] != self.last_tx.arguments:
-            raise AttributeError
-            # if the 
+        if request.arguments[2] != self.last_tx.pipe_string:
+            raise AttributeError("Returning instruction call does not match last sent instruction call")
+        elif request.denominator != "REQUEST":
+            raise AttributeError(f"Engine_first calls expected 'REQUEST' denominator, got: {request.denominator}")
+        elif self._determine_length(request.arguments) != request.parameters.arg_length:
+            raise AttributeError(f"Received argument length [{self._determine_length(request.arguments)}] does not match expected value [{request.parameters.arg_length}]")
+        elif not callable(request.parameters.function_to_call):
+            raise ValueError("Engine_first instructions must have a function to call")
+        
+        try:
+            return request.parameters.function_to_call(*request.arguments[2][2])
+        except Exception as e:
+            raise ValueError(e)
 
+    ## CALLABLE ENGINE_FIRST FUNCTIONS
+
+    def _resign(self):
+        pass
+
+    def _invalid_function_solve(self):
+        pass
+
+    
+    ## TECHNICAL FUNCTIONS
 
     def _find_instruction_from_string(self,string_to_search):
         values = self.translate.values()

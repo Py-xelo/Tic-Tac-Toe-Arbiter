@@ -58,7 +58,7 @@ class Engine_handler:
                 arbins.PING_REPLY : Instruction_base(arg_length=1, returns=int, reply=arbins.PING, arbiter=True, sendable=False),
                 arbins.PIPE_CLOSE : Instruction_base(timeout=engset.ARBITER_DEFAULT_TIMEOUT,arbiter=True),
                 arbins.PIPE_CLOSED : Instruction_base(reply=arbins.PIPE_CLOSE, arbiter=True, sendable= False),
-                arbins.INSTRUCTION_INVALID : Instruction_base(arg_length=3, returns=(typing.AnyStr,typing.AnyStr,typing.Tuple), reply=True, engine_first=True, arbiter= True, sendable=False)
+                arbins.INSTRUCTION_INVALID : Instruction_base(arg_length=3, returns=(str,ins|arbins,(str,ins|arbins,tuple)), reply=True, engine_first=True, arbiter= True, sendable=False)
             }
 
             # automatically assigns the string version of the instruction to its respective instruction object
@@ -125,12 +125,33 @@ class Engine_handler:
             else:
                 raise ConnectionError()
 
+            if self._determine_length(received_packet) != 3:
+                raise ValueError
+                # if the packet length is not 3, it is not a valid packet
+            
+
+                        
+
             instruction_code = self._find_instruction_from_string(unverified_instruction[1])
             if not instruction_code:
                 raise ValueError()
-            
+
+           
             request = Request(unverified_instruction[0],instruction_code,self.translate[instruction_code],unverified_instruction[2])
 
+            try: self._verify_packet_parameters(request)
+            except StopIteration: self._verify_engine_first(request)
+            except Exception as err: raise err
+
+            #stinky_girl
+
+            
+
+            
+        def _verify_engine_first(self,request):
+            pass
+
+        def _verify_packet_parameters(self,request: Request): #FINISH ERROR CALLS
             try:
                 if not request.parameters.reply and not request.parameters.engine_first:
                     raise ValueError
@@ -150,20 +171,15 @@ class Engine_handler:
                     elif request.denominator == "REPLY" and not self.last_tx.parameters.reply:
                         raise ValueError
                         # receive is a reply, however last sent instruction does not expect a reply
-    
+
                                         
                 if request.instruction != self.last_tx.parameters.reply:
                     raise ValueError
                     # if the receive is a reply, but doesnt match with reply condition last sent instruction expects 
-                
-                    
-            except StopIteration: self._handle_engine_first()
-            except Exception as err: raise err
-
-            
-        def _handle_engine_first(self,request):
-            pass
-
+                if self._determine_length(request.arguments) != request.parameters.arg_length:
+                    raise ValueError
+                    # checks if actual received length of arguments matches expected value for a given function
+            except Exception as e: raise e
 
 
         def _find_instruction_from_string(self,string_to_search):

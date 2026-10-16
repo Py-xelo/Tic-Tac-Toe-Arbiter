@@ -52,7 +52,7 @@ def engine_instance_start(engine_id):
 
 if __name__ == "__main__":
     try:
-        id_1 = 2
+        id_1 = 0
         engine = engine_instance_start(id_1)
         if not engine:
             raise RuntimeError()
@@ -62,9 +62,15 @@ if __name__ == "__main__":
         print(f"[{id_1}]: Engine started and ready")
         try:
             engine.comms.send(ins.MOVE,())
+            engine.comms.receive()
         except KeyboardInterrupt:
             print("exit on interrupt")
             engine._terminate_engine()
         except Exception:
+            traceback.print_exc(-1)
+            engine._terminate_engine()
+        else:
+            time.sleep(1)
+            print("exit success")
             engine._terminate_engine()
         

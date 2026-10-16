@@ -10,7 +10,6 @@ import os
 import importlib.util
 import inspect
 import sys
-import errno
 from dataclasses import dataclass
 import typing
 import traceback
@@ -29,7 +28,7 @@ class Engine_handler():
     def __init__(self,engine_directory, engine_identificator, cpu_affinity:tuple):
         connection = mpcon.Pipe()
         self.pipe = Pipe(*connection)
-        self.comms = Communications(self.pipe,engine_identificator)
+        self.comms = Communications(self,self.pipe,engine_identificator)
         self.identificator = engine_identificator
 
         if not os.path.isdir(engine_directory): # checks if provided engine directory exists
@@ -53,10 +52,10 @@ class Engine_handler():
         self.engine.start()
         try:
             self.comms.send(arbins.PING,())
-            if not self.comms.receive(1):
-                raise AttributeError("Engine did not respond to initial ping")
-        except Exception as e:
-            raise e
+            self.comms.receive(1)        
+        except Exception:
+            self._terminate_engine()
+            raise AttributeError("Engine did not respond to initial ping")
     
 
     # Verification, that the Communications file provided by the engine is the same as the Engine_base - (if the versions match)
@@ -89,6 +88,19 @@ class Engine_handler():
         else:
             raise FileNotFoundError(f"Engine-side {engset.COMMS_FILENAME} does not exist or could not be found")
 
+    def _terminate_engine(self):
+        if not self.pipe.arbiter.closed:
+            self.comms.send(arbins.PIPE_CLOSE,())
+            self.pipe.was_closed = True
+        print(f"[{self.identificator}]: terminating engine")
+        children = self.process.children(True)
+        for process in children:
+            try:
+                process.terminate()
+            except psutil.NoSuchProcess:
+                pass
+        print(f"[{self.identificator}]: terminated")
+
     ## Functions to initiate the Main_Engine class in Engine_main.py file - both functions need to be bound (static), as they are already executed in a different process - dont have access to this class
     # basically imports Engine_main.py as a module so I can reference stuff inside of it
     @staticmethod
@@ -119,19 +131,6 @@ class Engine_handler():
             else:
                 main_engine_class(pipe_connection)
 
-    def _terminate_engine(self):
-            if not self.pipe.arbiter.closed:
-                self.pipe.arbiter.close()
-                self.pipe.was_closed = True
-            print(f"[{self.identificator}]: terminating engine")
-            children = self.process.children(True)
-            for process in children:
-                try:
-                    process.terminate()
-                except psutil.NoSuchProcess:
-                    pass
-            print(f"[{self.identificator}]: terminated")
-
 
 
 @dataclass
@@ -145,8 +144,9 @@ class Request:
 
 
 
-class Communications(Engine_handler):
-    def __init__(self,connection: Pipe, identification: typing.AnyStr):
+class Communications():
+    def __init__(self,parent_instance: Engine_handler ,connection: Pipe, identification: typing.LiteralString):
+        self.parent = parent_instance
         self.identificator = identification
         self.pipe = connection
         self.last_tx = Request(None,None,None,None,None)
@@ -231,22 +231,24 @@ class Communications(Engine_handler):
         self.pipe.arbiter.send(request.pipe_string)
 
 
-    def receive(self, timeout: int = engset.MAX_TIMEOUT):
+    def receive(self, timeout: int = engset.MOVE_DEFAULT_TIMEOUT, raise_error: bool = True):
         try:
             if timeout > engset.MAX_TIMEOUT:
                 raise ValueError("set timeout exceeds maximum allowed timeout")
-            receive = self._get_and_verify(timeout=timeout)
-        except AttributeError:
-            self._terminate_engine()
-            print(f"[{self.identificator}]: ERROR: Determined Engine-Error on instruction receive. Engine terminated")
-            traceback.print_exc(-1)
-            return None
-        except ValueError:
-            print(f"[{self.identificator}]: WARNING: Determined Arbiter-Error on instruction receive")
-            traceback.print_exc(-1)
-            return None
-        else:
-            return receive
+            return self._get_and_verify(timeout=timeout)
+        except Exception as exc:
+            if isinstance(exc,AttributeError):
+                error_type = "Engine"
+            elif isinstance(exc,ValueError):
+                error_type = "Arbiter"
+            elif isinstance(exc,Exception):
+                error_type = "Unknown"
+
+            print(f"[{self.identificator}]: ERROR: Determined {error_type}-Error on instruction receive")
+
+            if raise_error:
+                raise exc
+
 
 
     def _get_and_verify(self, timeout): # FINISH ERRORS
@@ -260,6 +262,7 @@ class Communications(Engine_handler):
         if self.pipe.arbiter in received_packet:
             unverified_instruction = self.pipe.arbiter.recv()
         else:
+            print(f"[{self.identificator}]: No instruction received")
             return None
 
         if self._determine_length(unverified_instruction) != 3:
@@ -304,7 +307,6 @@ class Communications(Engine_handler):
                                 
         except StopIteration:
             return self._handle_engine_first()
-        except Exception as e: raise e
         else:
             print(f"[{self.identificator}]: Received instruction {request.instruction}: {unverified_instruction}")
             self.last_rx = request
@@ -312,6 +314,7 @@ class Communications(Engine_handler):
 
         
     def _handle_engine_first(self,request: Request):
+        print("called engine first")
         if request.arguments[2] != self.last_tx.pipe_string:
             raise AttributeError("Returning instruction call does not match last sent instruction call")
         elif request.denominator != "REQUEST":
@@ -356,7 +359,7 @@ class Communications(Engine_handler):
         elif self.pipe.arbiter.closed == self.pipe.was_closed:
             return False
         else:
-            raise BrokenPipeError(errno.ECONNREFUSED,"Pipe was closed without previous instruction")
+            raise BrokenPipeError("Pipe was closed without previous instruction")
 
     def _determine_length(self,function_arguments):
             """

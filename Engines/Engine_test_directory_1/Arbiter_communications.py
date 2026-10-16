@@ -50,6 +50,7 @@ class Arbiter_communication:
             raise RuntimeError("Cannot send data through closed pipe")
         if not arguments:
             raise ValueError("Empty packet cannot be sent to Arbiter!")
+        print("sent",arguments)
         self.pipe.send(arguments)
 
 
@@ -115,7 +116,6 @@ class Arbiter_communication:
             length = 1
         else:
             length = None
-
         return length
 
 
@@ -125,7 +125,6 @@ class Arbiter_communication:
             arguments = received_data[2]
             self.translate_function[received_data[1]][1](*arguments)
         elif valid: #if its valid but not for arbiter, just return
-            print(self.translate_function[received_data[1]][1])
             return received_data[1:]
         else:
             self.send_to_arbiter(("ARBITER","INSTRUCTION_INVALID",(received_data))) #incase of invalid receive, let the arbiter know. sends back the whole 
@@ -135,6 +134,5 @@ class Arbiter_communication:
         """
         if this function is triggered without Arbiter specifically asking, the Engine which called this will be terminated right away
         """
-        self.send_to_arbiter(("ARBITER","PIPE_CLOSED",()))
         self.pipe.close()
         self.pipe_open = False

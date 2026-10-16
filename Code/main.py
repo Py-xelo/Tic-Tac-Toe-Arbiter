@@ -43,7 +43,7 @@ def engine_instance_start(engine_id):
     
     try:
         instance_data = engines.get_data(engine_id)
-        print(f"[{instance_data[0]}]: instance created from path: {instance_data[1]}")
+        print(f"[{instance_data[0]}]: instance set to path: {instance_data[1]}")
         return Engine_handler(os.path.join(engines.path,instance_data[1]),instance_data[0],(0,1))
     except Exception:
         print(f"[{id_1}]: ENGINE INITIATION FAILED!")
@@ -52,21 +52,19 @@ def engine_instance_start(engine_id):
 
 if __name__ == "__main__":
     try:
-        id_1 = 0
-        engine_instance = engine_instance_start(id_1)
-        if not engine_instance:
+        id_1 = 2
+        engine = engine_instance_start(id_1)
+        if not engine:
             raise RuntimeError()
     except Exception as e:
         print(e)
     else:
         print(f"[{id_1}]: Engine started and ready")
         try:
-            while True:
-                print("in loop")
-                time.sleep(0.5)
+            engine.comms.send(ins.MOVE,())
         except KeyboardInterrupt:
             print("exit on interrupt")
-            engine_instance._terminate_engine()
+            engine._terminate_engine()
         except Exception:
-            engine_instance._terminate_engine()
-    
+            engine._terminate_engine()
+        

@@ -64,9 +64,9 @@ class Arbiter_communication:
         # dictionary which has the argument details for each function the Arbiter can call
             # currently only checks length of arguments cuz its just easier for now
         self.translate_function = {
-            "MOVE": 0,
-            "PONDER" : int,
-            "SETTINGS" : int,
+            "MOVE": (0,None),
+            "PONDER" : (0,None),
+            "SETTINGS" : (0,None),
             "PIPE_CLOSE": (0,self.__close_pipe),
             "PING": (0,self._ping)
             }

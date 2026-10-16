@@ -51,9 +51,12 @@ class Engine_handler():
         self.process = psutil.Process(self.engine.pid)
         self.process.cpu_affinity(cpu_affinity)
         self.engine.start()
-        if not self.comms.send(arbins.PING,()):
-            raise 
-        self.comms.receive()
+        try:
+            self.comms.send(arbins.PING,())
+            if not self.comms.receive(1):
+                raise AttributeError("Engine did not respond to initial ping")
+        except Exception as e:
+            raise e
     
 
     # Verification, that the Communications file provided by the engine is the same as the Engine_base - (if the versions match)
@@ -171,7 +174,7 @@ class Communications(Engine_handler):
 
     ## SEND AND RECEIVE FUNCTIONS
 
-    def send(self,instruction: ins|arbins, function_args: typing.Tuple):
+    def send(self,instruction: ins|arbins, function_args: typing.Tuple = ()):
         try:
             self.send_wrapper(instruction,function_args)
         except AttributeError:

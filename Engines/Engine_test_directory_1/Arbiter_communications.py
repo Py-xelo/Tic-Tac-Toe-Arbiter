@@ -35,20 +35,22 @@ class Arbiter_communication:
         return self._handle_received(request)
             
 
-    def send_to_arbiter(self,data_to_send): #sends the inputed data packet to Arbiter through pipe
+    def send_to_arbiter(self,arguments=None,use_last_function = True): #sends the inputed data packet to Arbiter through pipe
         """
         Sends a packet back to Arbiter as a mean of replying to a previously sent Arbiter instruction.\n
+        DATA SHOULD BE FORMATTED AS: ('function_name',(*arguments))
         BEWARE:
         1. Sending an Empty packet will raise a ValueError. 
         2. Sending an incorrectly formatted packet is an error and will forfeit forfeit game to opponent.
             > Reply packets should be formatted as ("name of received instruction",(docs specified reply))  
         3. Unless otherwise specified, sending a non-reply packet will forfeit the game to opponent
         """
+
         if not self.pipe_open:
             raise RuntimeError("Cannot send data through closed pipe")
-        if not data_to_send:
+        if not arguments:
             raise ValueError("Empty packet cannot be sent to Arbiter!")
-        self.pipe.send(data_to_send)
+        self.pipe.send(arguments)
 
 
     # Interal back-end functions and workings, you likely wont need these :D
@@ -56,6 +58,7 @@ class Arbiter_communication:
     def __init__(self,pipe_conn: mpcon.Connection): #initiation of the whole class, opens connections and initiates dictionaries
             self.pipe = pipe_conn
             self.pipe_open = True
+            self.last_function = None
             self._define_translation_dictionary()
             
             
@@ -64,9 +67,8 @@ class Arbiter_communication:
         # dictionary which has the argument details for each function the Arbiter can call
             # currently only checks length of arguments cuz its just easier for now
         self.translate_function = {
-            "MOVE": (0,None),
-            "PONDER" : (0,None),
-            "SETTINGS" : (0,None),
+            "MOVE": (0,None,"REPLY"),
+            "RESIGN": (0,None,"REQUEST"),
             "PIPE_CLOSE": (0,self.__close_pipe),
             "PING": (0,self._ping)
             }
@@ -123,6 +125,7 @@ class Arbiter_communication:
             arguments = received_data[2]
             self.translate_function[received_data[1]][1](*arguments)
         elif valid: #if its valid but not for arbiter, just return
+            print(self.translate_function[received_data[1]][1])
             return received_data[1:]
         else:
             self.send_to_arbiter(("ARBITER","INSTRUCTION_INVALID",(received_data))) #incase of invalid receive, let the arbiter know. sends back the whole 

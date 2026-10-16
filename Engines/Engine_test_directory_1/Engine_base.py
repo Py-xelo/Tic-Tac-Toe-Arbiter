@@ -1,8 +1,5 @@
 from Arbiter_communications import Arbiter_communication
 
-class Game_settings:
-    pass
-
 class Engine_Base_class:
     def __init__(self,pipe_conn):
         self.comms = Arbiter_communication(pipe_conn)
